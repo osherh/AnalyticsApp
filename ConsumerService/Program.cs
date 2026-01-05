@@ -18,7 +18,7 @@ await chConnection.OpenAsync();
 
 // Create table if not exists
 await using var createCommand = chConnection.CreateCommand();
-createCommand.CommandText = "CREATE TABLE IF NOT EXISTS default.messages (id Int64, content String) ENGINE = MergeTree ORDER BY id";
+createCommand.CommandText = "CREATE TABLE IF NOT EXISTS default.messages (data JSON) ENGINE = MergeTree ORDER BY tuple()";
 await createCommand.ExecuteNonQueryAsync();
 
 Console.WriteLine("Waiting for messages...");
@@ -26,18 +26,29 @@ Console.WriteLine("Waiting for messages...");
 var consumer = new AsyncEventingBasicConsumer(channel);
 consumer.ReceivedAsync += async (model, ea) =>
 {
-    var body = ea.Body.ToArray();
-    var json = Encoding.UTF8.GetString(body);
-    var message = JsonSerializer.Deserialize<Dictionary<string, object>>(json);
-    long id = Convert.ToInt64(message["Id"]);
-    string content = message["Content"].ToString();
+    try
+    {
+        var body = ea.Body.ToArray();
+        var json = Encoding.UTF8.GetString(body);
 
-    // Insert into ClickHouse
-    await using var insertCommand = chConnection.CreateCommand();
-    insertCommand.CommandText = $"INSERT INTO default.messages (id, content) VALUES ({id}, '{content.Replace("'", "''")}')";
-    await insertCommand.ExecuteNonQueryAsync();
+        // Validate JSON
+        using var doc = JsonDocument.Parse(json);
 
-    Console.WriteLine($"Inserted: {json}");
+        // Insert into ClickHouse
+        await using var insertCommand = chConnection.CreateCommand();
+        insertCommand.CommandText = $"INSERT INTO default.messages (data) VALUES ('{json.Replace("'", "''")}')";
+        await insertCommand.ExecuteNonQueryAsync();
+
+        Console.WriteLine($"Inserted: {json}");
+    }
+    catch (JsonException ex)
+    {
+        Console.WriteLine($"Invalid JSON received: {ex.Message}");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error inserting message: {ex.Message}");
+    }
 };
 
 await channel.BasicConsumeAsync("my_queue", autoAck: true, consumer: consumer);
