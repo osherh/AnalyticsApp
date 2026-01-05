@@ -1,0 +1,11 @@
+
+# Ignore build output folders for all projects
+**/bin/
+**/obj/
+
+# Optional: IDE and user files
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
